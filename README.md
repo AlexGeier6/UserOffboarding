@@ -4,9 +4,9 @@ User Offboarding Script for on-Prem Exchange/AD Environment
 This project was initially a project written for an on-prem environment.  That environment has since moved to Hybrid 365.  Therefore, changes need to be made to the script to account for that.
 Below is a list of changes the original script made followed by a list of changes that need to be made to that original script.
 
-==================================================
+============================
 CURRENT OFFBOARDING STEPS:
-==================================================
+============================
 
 <# --- Active Directory account dispensation section --- #>
 #Pull a list of SSRS subscriptions and/or Watchdog Reports for the user and remove the user from those reports
@@ -27,9 +27,9 @@ CURRENT OFFBOARDING STEPS:
 #disable Exchange settings (OWA/ActiveSync/etc.)
 # Move the account to the Disabled Users OU
 
-==================================================
+============================
 O365 OFFBOARDING STEPS:
-==================================================
+============================
 
 <# --- Active Directory account dispensation section --- #>
 No change Needed: #Pull a list of SSRS subscriptions and/or Watchdog Reports for the user and remove the user from those reports
