@@ -10,12 +10,12 @@ CURRENT OFFBOARDING STEPS:
 
 ============================
 
-ctive Directory account dispensation section
+Active Directory account dispensation section
 Pull a list of SSRS subscriptions and/or Watchdog Reports for the user and remove the user from those reports
 Remove/Retire user from TMW, TMT, and TotalMail
 Disable the account
 Generates a random 20-character password and converts it to plaintext for use in this script.
-Resets user's password
+Resets the user's password
 set extensionAttribute10 to today's date for use when deleting the account
 Add the OU path where the account originally came from to the description of the account's properties
 Get the list of permissions (group names) and export them to a CSV file for safekeeping
