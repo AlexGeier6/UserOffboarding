@@ -4,22 +4,24 @@ $todaysDate = get-date -Format 'MM-dd-yyy'
 # Un-comment the following if PowerShell isn't already set up to do this on its own
 Import-Module ActiveDirectory
 Import-Module sqlserver
+Import-Module ADSync
 
 
  #Blank the console
- Clear-Host
-Write-host "Enter the SQL Server Credentials" -BackgroundColor White
-$credential = Get-Credential
-$serverName = 'SQLSVR01'
-try {
-        Invoke-Sqlcmd -ServerInstance $serverName -Database TMW_Live -Credential $credential -query "SELECT GETDATE() AS TimeOfQuery;"
-        
-}
-catch {
-        
-        Start-Sleep -Seconds 3
-        Exit
-}
+# Clear-Host
+# Write-host "Enter the SQL Server Credentials" -BackgroundColor White
+# $credential = Get-Credential
+# $serverName = 'SQLSVR01'
+# try {
+#         Invoke-Sqlcmd -ServerInstance $serverName -Database TMW_Live -Credential $credential -query "SELECT GETDATE() AS TimeOfQuery;"
+#         write-host "Access Granted" `r`n -ForegroundColor Black -BackgroundColor Green
+# }
+# catch {
+#         write-host "SQL Server Username or Password is incorrect. Access Denied" -ForegroundColor White -BackgroundColor Red
+#         Start-Sleep -Seconds 3
+#         Exit
+# } 
+
 
 #If user passes checks, the script continues
 Write-Host "Offboard a user"
@@ -29,20 +31,17 @@ $sam = Read-Host 'Account name to disable'
 
 # Get the properties of the account and set variables
 $user = Get-ADuser $sam -properties canonicalName, distinguishedName, displayName, mailNickname, mail
-$dn = $user.distinguishedName
-$cn = $user.canonicalName
 $din = $user.displayName
-$offboardedEmail = $user.mail
 
 $UserManager = (Get-ADUser (Get-ADUser $sam -Properties manager).manager -Properties mail).mail
-$AutoReply = "I am no longer with *Company*. If you need assistance please reach out to " + $UserManager + "."
+$AutoReply = "I am no longer with NAPA Transportation. If you need assistance please reach out to " + $UserManager + "."
 
 #Offboarding Logs for memberOf, SSRS, and DawgAlerts
-$Query1 = 'remove_email_from_dawg_and_ssrs_subscriptions'
-$path1 = "\\fileserver\Offboarding logs\"
+$Query1 = 'napa_remove_email_from_dawg_and_ssrs_subscriptions'
+$path1 = "\\fileserver\IT Share\Offboarding logs\"
 $path2 = "-AD-DisabledUserPermissions.csv"
 $pathFinal = $path1 + $din + $path2
-$SQLPath1 = "\\fileserver\Offboarding logs\"
+$SQLPath1 = "\\fileserver\IT Share\Offboarding logs\"
 $SQLPath2 = "-AD-DisabledUserPermissions.txt"
 $SQLpathFinal = $SQLPath1 + $din + $SQLPath2
 
@@ -50,12 +49,12 @@ $SQLpathFinal = $SQLPath1 + $din + $SQLPath2
 Try {
         
         #Pull a list of SSRS subscritions and/or Watchdog Reports for the user on remove the user from those reports
-        $query1Results = Invoke-Sqlcmd -ServerInstance $serverName -Database TMW_Live -Credential $credential -query "[dbo].[remove_email_from_dawg_and_ssrs_subscriptions] @offboarded_email = '$offboardedEmail'"  
-        $query1Results | Out-File -FilePath $SQLpathFinal
-        $SQLresultsHTML = $query1Results | ConvertTo-Html -Property 'report_name' | Out-String
+        # $query1Results = Invoke-Sqlcmd -ServerInstance $serverName -Database TMW_Live -Credential $credential -query "[dbo].[napa_remove_email_from_dawg_and_ssrs_subscriptions] @offboarded_email = '$offboardedEmail'"  
+        # $query1Results | Out-File -FilePath $SQLpathFinal
+        # $SQLresultsHTML = $query1Results | ConvertTo-Html -Property 'report_name' | Out-String
 
-        #Remove/Retire user from TMW, TMT, and TotalMail
-        Invoke-Sqlcmd -ServerInstance $serverName -Database TMW_Live -Credential $credential -query "[dbo].[remove_tmw_and_totalmail_login] @email_address = '$offboardedEmail'"  
+        # #Remove/Retire user from TMW, TMT, and TotalMail
+        # Invoke-Sqlcmd -ServerInstance $serverName -Database TMW_Live -Credential $credential -query "[dbo].[napa_remove_tmw_and_totalmail_login] @email_address = '$offboardedEmail'"  
 
         # Disable the account
         Disable-ADAccount $sam
@@ -72,10 +71,6 @@ Try {
         #set extensionAttribute to todays date for use when deleting the account
         Set-ADUser -Identity "$sam" -Clear "extensionAttribute10"
         Set-ADUser -Identity "$sam" -Add @{extensionAttribute10= "$todaysDate"}
-
-        # Add the OU path where the account originally came from to the description of the account's properties
-        Set-ADUser $dn -Description ("Moved from: " + $cn + " - on $date")
-        Write-Host ($din + "'s Active Directory account path saved.")
 
 Start-Sleep -Seconds 3
 
@@ -102,67 +97,45 @@ Start-Sleep -Seconds 3
         Get-ADUser $User -Properties MemberOf | Select-Object -Expand MemberOf | ForEach-Object{Remove-ADGroupMember $_ -member $User -Confirm:$false}
         Write-Host ($din + "'s Active Directory group memberships (permissions) stripped from account")
 
+        # Remove the O365 License
+        Connect-MgGraph
+        $MgUserEmail = $user.mail
+        $MGuser = Get-MgUser -Filter "mail eq '$MgUserEmail'"
+        $MGuser
+        $licensesToRemove = $MGuser.AssignedLicenses | Select -ExpandProperty SkuId
+        $licensesToRemove
+        Set-MgUserLicense -UserId $MGuser.UserPrincipalName -RemoveLicenses $licensesToRemove -AddLicenses @{}
+
 <# --- Exchange email account dispensation section --- #>
 # Import the Exchange snapin (assumes desktop PowerShell)
         if (!(Get-PSSnapin | Where-Object {$_.Name -eq "Microsoft.Exchange.Management.PowerShell.SnapIn"})) { 
-	    $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri http://MAILSERVER.local/Powershell -Authentication Kerberos
+	    $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri http://MAILSERVER.napa.local/Powershell -Authentication Kerberos
         Import-PSSession $Session -DisableNameChecking -AllowClobber
               
         #remove any previously configured forwarding rules
-        Set-Mailbox -Identity "$sam" -forwardingsmtpaddress $null
-        Set-Mailbox -Identity "$sam" -forwardingaddress $null
+        Set-RemoteMailbox -Identity "$sam" -forwardingsmtpaddress $null
+        Set-RemoteMailbox -Identity "$sam" -forwardingaddress $null
 
         #configure forwarding to Supervisor's email address
-        Set-Mailbox -Identity "$sam" -forwardingsmtpaddress  $UserManager -DeliverToMailboxAndForward $true
+        Set-RemoteMailbox -Identity "$sam" -Type Shared
+        Add-MailboxPermission -Identity "$user" -User "$UserManager" -AccessRights FullAccess -InheritanceType All
 
         #set Out of Office on the user's mailbox.
         Set-MailboxAutoReplyConfiguration -Identity "$sam" -AutoReplyState Enabled -InternalMessage $AutoReply -ExternalMessage $AutoReply
 
-        # Loop flag variables
-        $Go1 = 0
-        $Go2 = 0
-        $Go3 = 0
-        $GoDone = 0
-
-       Function Save-File ([string]$initialDirectory) {
-
-	    $PresAdmin = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-	    $AdminCheck = Get-ManagementRoleAssignment -RoleAssignee "$PresAdmin" -Role "Mailbox Import Export" -RoleAssigneeType user
-	    If ($AdminCheck -eq $Null) {New-ManagementRoleAssignment -Role "Mailbox Import Export" -User $PresAdmin}
-
-	    $MailBackupFileDate = (get-date -UFormat %b-%d-%Y_%I.%M.%S%p)
-	    $MailBackupInitialPath = "\\oldemployeeemailpst\"
-	    $MailBackupFileName = $sam+$MailBackupFileDate+".pst"
-
-        Add-Type -AssemblyName System.Drawing
-        Add-Type -AssemblyName System.Windows.Forms
-    
-        $OpenFileDialog = New-Object System.Windows.Forms.SaveFileDialog
-        $OpenFileDialog.initialDirectory = $MailBackupInitialPath
-        $OpenFileDialog.filter = "PST (*.pst)| *.pst"
-	$OpenFileDialog.FileName = $MailBackupFileName
-        $OpenFileDialog.ShowDialog() | Out-Null
-
-        return $OpenFileDialog.filename
-
 }
-
-        #Export .pst file
-        $MailBackupFile = Save-File
-        New-MailboxExportRequest -Mailbox $sam -FilePath $MailBackupFile
 
         #disable Exchange settings (OWA/ActiveSync/etc.)
         Set-CasMailbox -Identity "$sam" -OWAEnabled $false -ActiveSyncEnabled $false -PopEnabled $false -ImapEnabled $false -OWAforDevicesEnabled $False
         
-        # Move the account to the Disabled Users OU
-        Move-ADObject -Identity $dn -TargetPath "Ou=Terminated,OU=Users,DC=napa,DC=local"
-        Write-Host ($din + "'s Active Directory account moved to 'Terminated' OU")
+Start-sleep -Seconds 3
 
-        }
+#Perform a sync on on-prem and Cloud exchange/Active Driectory
+Start-ADSyncSyncCycle -PolicyType Delta
 
-$To         = ($UserManager)
-$From       = 'IT@company.com'
-$SmtpServer = 'mail.company.com'
+$To         = "alex.geier@napatran.com"#'IT@napatran.com','HR@napatran.com', ($UserManager)
+$From       = 'IT@napatran.com'
+$SmtpServer = 'mail.napatran.com'
 $Subject    = ($din + ' was successfully offboarded') 
 $Body       = @"
 <p>The following changes have been made to the user's account:<br />
@@ -171,10 +144,10 @@ The User's email has been forwarded to their Manager.<br />
 An automatic reply has been enabled of the user's mailbox.<br />
 The password has been changed.<br />
 Account path saved.<br />
-Group memberships (permissions) exported and saved to '\\fileserver\Offboarding logs\'<br />
+Group memberships (permissions) exported and saved to '\\fileserver\IT Share\Offboarding logs\'<br />
 Group memberships (permissions) were stripped from the account.<br />
-The account moved to Terminated OU<br />
-Mailbox .pst was exported and saved to drive.<br />
+The account moved to NAPA_Terminated OU<br />
+Mailbox .pst was exported and saved to Backup1.<br />
 Exchange settings were disabled (ActiveSync/OWA/etc.).<br />
 The user has been removed from the following Reports:<br />
 <p $SQLresultsHTML </p>
@@ -186,6 +159,6 @@ Catch
 {
     $ErrorMessage = $_.Exception.Message
     $FailedItem = $_.Exception.ItemName
-    Send-MailMessage -From 'IT@company.com' -To 'alex.geier@company.com' -Subject "EmployeeOffboarding Script has failed to disable a user account" -SmtpServer 'mail.company.com' -Body "The error message is: '$ErrorMessage' $FailedItem"
+    Send-MailMessage -From 'IT@napatran.com' -To 'alex.geier@napatran.com' -Subject "EmployeeOffboarding Script has failed to disable a user account" -SmtpServer 'mail.napatran.com' -Body "The error message is: '$ErrorMessage' $FailedItem"
     Break
 }
